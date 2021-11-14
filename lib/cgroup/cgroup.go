@@ -3,6 +3,7 @@ package cgroup
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
@@ -12,6 +13,9 @@ import (
 const (
 	CgroupMountDir = "/tmp/rjob/cgroup"
 	fileMode       = 0660
+	cpuMaxFile     = "cpu.max"
+	memoryMaxFile  = "memory.max"
+	ioWeightFile   = "io.weight"
 )
 
 // CgroupConfig is used to create, delete, and manage a cgroup.
@@ -34,6 +38,7 @@ func Mount(mountDir string) error {
 	}
 
 	if err := unix.Mount("none", mountDir, "cgroup2", 0, ""); err != nil {
+		os.Remove(mountDir)
 		return fmt.Errorf("error mounting cgroup2 at %s: %s", mountDir, err)
 	}
 
@@ -95,86 +100,75 @@ func (cg *CgroupConfig) Delete() error {
 	return nil
 }
 
-func (cg *CgroupConfig) setCpuLimit() error {
-	cpuFile, err := os.OpenFile(fmt.Sprintf("%s/cpu.max", cg.Path), os.O_APPEND|os.O_WRONLY, fileMode)
+func setCgroupLimit(path, limit string) error {
+	cgFile, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, fileMode)
 	if err != nil {
-		return fmt.Errorf("error opening %s/cpu.max: %s", cg.Path, err)
+		return fmt.Errorf("error opening %s: %s", path, err)
 	}
-	defer cpuFile.Close()
+	defer cgFile.Close()
 
-	if _, err := cpuFile.WriteString(cg.getCpuMax()); err != nil {
-		return fmt.Errorf("error writing CPU limit to %s/cpu.max: %s", cg.Path, err)
+	if _, err := cgFile.WriteString(limit); err != nil {
+		return fmt.Errorf("error writing limit to %s: %s", path, err)
 	}
 
 	return nil
+}
+
+func (cg *CgroupConfig) setCpuLimit() error {
+	cpuMax, err := cg.getCpuMax()
+	if err != nil {
+		return err
+	}
+	return setCgroupLimit(filepath.Join(cg.Path, cpuMaxFile), cpuMax)
 }
 
 func (cg *CgroupConfig) setMemoryLimit() error {
-	memoryFile, err := os.OpenFile(fmt.Sprintf("%s/memory.max", cg.Path), os.O_APPEND|os.O_WRONLY, fileMode)
+	memMax, err := cg.getMemMax()
 	if err != nil {
-		return fmt.Errorf("error opening %s/memory.max: %s", cg.Path, err)
+		return err
 	}
-	defer memoryFile.Close()
-
-	// TODO: Change API to accept memory in bytes, or switch both the MB. KB is silly.
-	if _, err := memoryFile.WriteString(cg.getMemMax()); err != nil {
-		return fmt.Errorf("error writing memory limit to %s/memory.max: %s", cg.Path, err)
-	}
-
-	return nil
+	return setCgroupLimit(filepath.Join(cg.Path, memoryMaxFile), memMax)
 }
 
 func (cg *CgroupConfig) setBlkIoLimit() error {
-	ioFile, err := os.OpenFile(fmt.Sprintf("%s/io.weight", cg.Path), os.O_APPEND|os.O_WRONLY, fileMode)
+	ioWeight, err := cg.getIoWeight()
 	if err != nil {
-		return fmt.Errorf("error opening %s/io.weight: %s", cg.Path, err)
+		return err
 	}
-	defer ioFile.Close()
-
-	if _, err := ioFile.WriteString(cg.getIoWeight()); err != nil {
-		return fmt.Errorf("error writing io limit to %s/io.weight: %s", cg.Path, err)
-	}
-
-	return nil
+	return setCgroupLimit(filepath.Join(cg.Path, ioWeightFile), ioWeight)
 }
 
-func (cg *CgroupConfig) getCpuMax() string {
+func (cg *CgroupConfig) getCpuMax() (string, error) {
 	switch {
 	case cg.Cpu < 1:
-		log.Infof("Minimum CPU setting is 1, got %d. Setting to 1.", cg.Cpu)
-		cg.Cpu = 1
+		return "", fmt.Errorf("minimum CPU setting is 1, got %d", cg.Cpu)
 	case cg.Cpu > 100:
-		log.Infof("Maximum CPU setting is 100, got %d. Setting to 100.", cg.Cpu)
-		cg.Cpu = 100
-		return "MAX 100000"
+		return "", fmt.Errorf("maximum CPU setting is 100, got %d", cg.Cpu)
 	case cg.Cpu == 100:
-		return "MAX 100000"
+		return "MAX 100000", nil
 	}
 
 	cpuMax := 100000
 	cpuLimit := float32(cpuMax) * (float32(cg.Cpu) / 100)
-	return fmt.Sprintf("%d %d", int(cpuLimit), cpuMax)
+	return fmt.Sprintf("%d %d", int(cpuLimit), cpuMax), nil
 }
 
-func (cg *CgroupConfig) getMemMax() string {
+func (cg *CgroupConfig) getMemMax() (string, error) {
 	if cg.Memory < 1 {
 		if cg.Memory < 0 {
-			log.Infof("Minimum memory setting is 0 (no limit), got %d. Setting to 0.", cg.Memory)
-			cg.Memory = 0
+			return "", fmt.Errorf("minimum memory setting is 0 (no limit), got %d", cg.Memory)
 		}
-		return "max"
+		return "max", nil
 	}
-	return fmt.Sprintf("%d", cg.Memory*1024)
+	return fmt.Sprintf("%d", cg.Memory*1024), nil
 }
 
-func (cg *CgroupConfig) getIoWeight() string {
+func (cg *CgroupConfig) getIoWeight() (string, error) {
 	switch {
 	case cg.Io < 10:
-		log.Infof("Minimum IO setting is 10, got %d. Setting to 10.", cg.Io)
-		cg.Io = 10
+		return "", fmt.Errorf("minimum IO setting is 10, got %d", cg.Io)
 	case cg.Io > 100:
-		log.Infof("Maximum IO setting is 100, got %d. Setting to 100.", cg.Io)
-		cg.Io = 100
+		return "", fmt.Errorf("maximum IO setting is 100, got %d", cg.Io)
 	}
-	return fmt.Sprintf("%d", cg.Io)
+	return fmt.Sprintf("default %d", cg.Io), nil
 }

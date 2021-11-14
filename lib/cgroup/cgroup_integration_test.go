@@ -3,10 +3,11 @@
 package cgroup
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
-	"strings"
+	"path/filepath"
 	"testing"
 )
 
@@ -14,7 +15,7 @@ import (
 // unmounted.
 func TestMountFS(t *testing.T) {
 	// Check of cgroup is already mounted
-	mounted, err := testCgroupMounted(CgroupMountDir)
+	mounted, err := testIsCgroupMounted(CgroupMountDir)
 	if mounted {
 		t.Fatalf("cgroup hierarchy is already mounted at %s", CgroupMountDir)
 	}
@@ -39,26 +40,27 @@ func TestCreateCgroup(t *testing.T) {
 		Cpu:    90,
 		Memory: 1024,
 		Io:     90,
-		Path:   fmt.Sprintf("%s/%s", CgroupMountDir, "testGroup"),
+		Path:   filepath.Join(CgroupMountDir, "testGroup"),
 	}
 
 	if err := config.Create(); err != nil {
 		t.Error(err)
 	}
 
-	config.testVerifyCgroupSettings(t)
+	testVerifyCgroupSettings(t, config)
 
 	config.Delete()
-	config.testVerifyCgroupDeleted(t)
+	testVerifyCgroupDeleted(t, config)
 	testUnmount(CgroupMountDir, t)
 
 }
 
 func testMount(path string, t *testing.T) {
+	t.Helper()
 	if err := Mount(CgroupMountDir); err != nil {
 		t.Fatal(err)
 	}
-	mounted, err := testCgroupMounted(CgroupMountDir)
+	mounted, err := testIsCgroupMounted(CgroupMountDir)
 	if !mounted {
 		t.Fatal("cgroup hierarchy failed to mount")
 	}
@@ -68,11 +70,12 @@ func testMount(path string, t *testing.T) {
 }
 
 func testUnmount(path string, t *testing.T) {
+	t.Helper()
 	if err := Umount(CgroupMountDir); err != nil {
 		t.Error(err)
 	}
 
-	mounted, err := testCgroupMounted(CgroupMountDir)
+	mounted, err := testIsCgroupMounted(CgroupMountDir)
 	if mounted {
 		t.Errorf("cgroup hierarchy is still mounted after unmounting")
 	}
@@ -81,41 +84,33 @@ func testUnmount(path string, t *testing.T) {
 	}
 }
 
-func (config *CgroupConfig) testVerifyCgroupSettings(t *testing.T) {
-	config.testVerifyCgroupCpuSetting(t)
+func testVerifyCgroupSettings(t *testing.T, config CgroupConfig) {
+	t.Helper()
+	testVerifyCgroupSetting(t, filepath.Join(config.Path, cpuMaxFile), config.getCpuMax)
+	testVerifyCgroupSetting(t, filepath.Join(config.Path, memoryMaxFile), config.getMemMax)
+	testVerifyCgroupSetting(t, filepath.Join(config.Path, ioWeightFile), config.getIoWeight)
+
 }
 
-func (config *CgroupConfig) testVerifyCgroupCpuSetting(t *testing.T) {
-	cpuData, err := os.ReadFile(fmt.Sprintf("%s/cpu.max", config.Path))
+func testVerifyCgroupSetting(t *testing.T, targetFile string, expectedFunc func() (string, error)) {
+	t.Helper()
+	expected, err := expectedFunc()
 	if err != nil {
-		t.Errorf("unable to read CPU settings: %s", err)
+		t.Errorf("unable to get expected limits: %s", err)
+		return
 	}
-	if strings.Compare(strings.TrimSuffix(string(cpuData), "\n"), config.getCpuMax()) != 0 {
-		t.Errorf("cpu.max setting incorrect. expected: %s, got %s", config.getCpuMax(), string(cpuData))
-	}
-}
-
-func (config *CgroupConfig) testVerifyCgroupMemorySetting(t *testing.T) {
-	memData, err := os.ReadFile(fmt.Sprintf("%s/memory.max", config.Path))
+	data, err := os.ReadFile(targetFile)
 	if err != nil {
-		t.Errorf("unable to read Memory settings: %s", err)
+		t.Errorf("unable to read settings from %s: %s", targetFile, err)
+		return
 	}
-	if strings.Compare(strings.TrimSuffix(string(memData), "\n"), config.getMemMax()) != 0 {
-		t.Errorf("memory.max setting incorrect. expected: %s, got %s", config.getMemMax(), string(memData))
-	}
-}
-
-func (config *CgroupConfig) testVerifyCgroupIoSetting(t *testing.T) {
-	ioData, err := os.ReadFile(fmt.Sprintf("%s/io.weight", config.Path))
-	if err != nil {
-		t.Errorf("unable to read IO settings: %s", err)
-	}
-	if strings.Compare(strings.TrimSuffix(string(ioData), "\n"), config.getIoWeight()) != 0 {
-		t.Errorf("io.weight setting incorrect. expected: %s, got %s", config.getIoWeight(), string(ioData))
+	if bytes.Compare(bytes.TrimSuffix(data, []byte("\n")), []byte(expected)) != 0 {
+		t.Errorf("%s setting incorrect. expected: %s, got %s", targetFile, string(expected), string(data))
 	}
 }
 
-func (config *CgroupConfig) testVerifyCgroupDeleted(t *testing.T) {
+func testVerifyCgroupDeleted(t *testing.T, config CgroupConfig) {
+	t.Helper()
 	_, err := os.Stat(config.Path)
 	if !errors.Is(err, os.ErrNotExist) {
 		if err == nil {
@@ -125,8 +120,8 @@ func (config *CgroupConfig) testVerifyCgroupDeleted(t *testing.T) {
 	}
 }
 
-func testCgroupMounted(path string) (bool, error) {
-	_, err := os.Stat(fmt.Sprintf("%s/cgroup.procs", path))
+func testIsCgroupMounted(path string) (bool, error) {
+	_, err := os.Stat(filepath.Join(path, "cgroup.procs"))
 	switch {
 	case err == nil:
 		return true, nil
