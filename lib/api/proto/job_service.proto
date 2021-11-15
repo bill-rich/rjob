@@ -10,20 +10,19 @@ service Jobs {
 }
 
 message StartJobInput {
-  string command = 1;
-  int32  cpu     = 3;
-  int32  memor   = 4;
-  int32  blkio   = 5;
+  string          command = 1;
+  repeated string args    = 2;
+  int32           cpu     = 3;
+  int32           memory = 4;
+  int32           blkio   = 5;
 }
 
 message StartJobResponse {
   string job_id  = 1;
-  string error   = 2;
 }
 
 message StopJobInput {
   string job_id  = 1;
-  int32  timeout = 3;
 }
 
 message StopJobResponse {
@@ -35,8 +34,8 @@ message StatusInput {
 }
 
 message StatusResponse {
-  string status    = 2;
-  int32  exit_code = 3;
+  string status    = 1;
+  int32  exit_code = 2;
 }
 
 message MonitorJobInput {

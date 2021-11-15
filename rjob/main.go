@@ -1,48 +1,51 @@
 package main
 
 import (
-	"fmt"
-	"os"
-	"time"
+	"log"
 
+	arg "github.com/alexflint/go-arg"
 	"github.com/bill-rich/rjob/lib/command"
-	"github.com/bill-rich/rjob/rjob/common"
+	"github.com/bill-rich/rjob/lib/server"
 )
 
+var args struct {
+	Operation     string   `arg:"positional,required"`
+	ListenAddress string   `default:"0.0.0.0"`
+	ListenPort    string   `default:"9080"`
+	Cgroup        string   `arg:"positional"`
+	Command       string   `arg:"positional"`
+	Args          []string `arg:"positional"`
+}
+
 func main() {
-	switch os.Args[1] {
+	arg.MustParse(&args)
+	switch args.Operation {
 	case "reexec":
-		// TODO: Verify the number of args before assuming they exist.
-		if len(os.Args) < 3 {
-			fmt.Printf("Not enough arguments to call exec")
-			return
-		}
-		cmdString := os.Args[3]
-		cgroup := os.Args[2]
-		var args []string
-		if len(os.Args) > 3 {
-			args = os.Args[4:]
+		if args.Cgroup == "" || args.Command == "" {
+			log.Fatalf("cgroup and command are required to call reexec")
 		}
 		job := command.JobConfig{
-			CgroupName: cgroup,
-			Command:    cmdString,
-			Args:       args,
+			CgroupName: args.Cgroup,
+			Command:    args.Command,
+			Args:       args.Args,
 		}
 		if err := job.Run(); err != nil {
-			fmt.Print(err)
-			return
+			log.Fatal(err)
 		}
 
-		bytesCurrent := 0
-		for job.Status == "RUNNING" {
-			if len(job.Output) > bytesCurrent {
-				fmt.Printf(string(job.Output[bytesCurrent:]))
-				bytesCurrent = len(job.Output)
-				time.Sleep(1 * time.Second)
-			}
-		}
-		fmt.Printf(string(job.Output[bytesCurrent:]))
+		job.PrintJobOutput()
 	case "start":
-		fmt.Printf("error: %s", common.StartServer())
+		server := server.ServerConfig{
+			CaLocation:   "/tmp/rjob/ssl/ca.crt",
+			CertLocation: "/tmp/rjob/ssl/server.crt",
+			KeyLocation:  "/tmp/rjob/ssl/server.key",
+
+			ListenAddress: args.ListenAddress,
+			ListenPort:    args.ListenPort,
+		}
+
+		if err := server.StartServer(); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
