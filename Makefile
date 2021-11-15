@@ -10,3 +10,8 @@ test_unit:
 .PHONY: test_integration
 test_integration:
 	go test $(TEST) --tags=integration
+
+build:
+	mkdir -p bin
+	go build -o bin/rclient rclient/main.go
+	go build -o bin/rjob rjob/main.go
