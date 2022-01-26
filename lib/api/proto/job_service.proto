@@ -1,0 +1,59 @@
+syntax = "proto3";
+option go_package = "github.com/bill-rich/rjob/api";
+
+service Jobs {
+  rpc Start (StartJobInput) returns (StartJobResponse) {}
+  rpc Stop (StopJobInput) returns (StopJobResponse) {}
+  rpc Status (StatusInput) returns (StatusResponse) {}
+  rpc Monitor (MonitorJobInput) returns (stream MonitorJobResponse) {}
+  rpc List (Empty) returns (ListJobsResponse) {}
+}
+
+message StartJobInput {
+  string          command = 1;
+  repeated string args    = 2;
+  int32           cpu     = 3;
+  int32           memory = 4;
+  int32           blkio   = 5;
+}
+
+message StartJobResponse {
+  string job_id  = 1;
+}
+
+message StopJobInput {
+  string job_id  = 1;
+}
+
+message StopJobResponse {
+  int32 exit_code = 1;
+}
+
+message StatusInput {
+  string job_id = 1;
+}
+
+message StatusResponse {
+  string status    = 1;
+  int32  exit_code = 2;
+}
+
+message MonitorJobInput {
+  string job_id = 1;
+}
+
+message MonitorJobResponse {
+  string chunk = 1;
+}
+
+message ListJobsResponse {
+  repeated JobInfo job_info = 1;
+}
+
+message JobInfo {
+  string task_id   = 1;
+  string status    = 2; // Can be RUNNING, STOPPED, or KILLED
+  int32  exit_code = 3;
+}
+
+message Empty {}
